@@ -60,11 +60,22 @@
                     <p class="font-medium text-primary truncate"><%= kraken_account.name %></p>
                     <p class="text-xs text-secondary"><%= kraken_account.account_type %></p>
                   </div>
+                  <%# Kraken reports in USD. Show the figure in the currency the account
+                      will actually be created in, which is the one every other number
+                      on the screen is in. %>
+                  <% display_currency = Current.family.currency
+                     raw_balance = kraken_account.current_balance || 0
+                     display_balance = begin
+                       Money.new(raw_balance, kraken_account.currency).exchange_to(display_currency).amount
+                     rescue StandardError
+                       display_currency = kraken_account.currency
+                       raw_balance
+                     end %>
                   <div class="text-right flex-shrink-0">
                     <p class="text-sm font-medium text-primary">
-                      <%= number_with_delimiter(kraken_account.current_balance || 0, delimiter: ",") %>
+                      <%= number_with_delimiter(display_balance.round(2), delimiter: ",") %>
                     </p>
-                    <p class="text-xs text-secondary"><%= kraken_account.currency %></p>
+                    <p class="text-xs text-secondary"><%= display_currency %></p>
                   </div>
                 </label>
               <% end %>
