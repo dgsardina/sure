@@ -111,7 +111,9 @@ class KrakenAccount::LedgerProcessor
       normalized  = normalizer.normalize(raw_asset)
       symbol      = normalized[:symbol]
       base_symbol = normalized[:price_symbol]
-      fiat        = KrakenAccount::FIAT_CURRENCIES.include?(base_symbol.to_s.upcase)
+      fiat        = KrakenAccount::FIAT_CURRENCIES.include?(
+        KrakenAccount::SecurityResolver.canonical_asset(base_symbol)
+      )
 
       # A crypto fee is paid in the units themselves, so it only reduces the
       # quantity; there is no second cash movement to split out.
