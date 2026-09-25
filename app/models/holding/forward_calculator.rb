@@ -108,7 +108,19 @@ class Holding::ForwardCalculator
           converted_price = trade.price
         end
 
-        tracker[:total_cost] += converted_price * trade.qty
+        # An acquisition fee is part of what the units cost, so it belongs in the
+        # basis. Providers record it on the trade and nothing reads it, so every
+        # gain derived from the basis understates what the purchase cost. Only
+        # buys reach here, so a disposal fee is never charged against the units
+        # still held.
+        trade_fee = trade.fee || 0
+        begin
+          converted_fee = trade_fee.zero? ? trade_fee : Money.new(trade_fee, trade.currency).exchange_to(account.currency).amount
+        rescue Money::ConversionError
+          converted_fee = trade_fee
+        end
+
+        tracker[:total_cost] += converted_price * trade.qty + converted_fee
         tracker[:total_qty] += trade.qty
       end
     end
