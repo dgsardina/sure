@@ -57,11 +57,43 @@ class KrakenAccount::SecurityResolver
     # a handful of fiats directly, so when the account is denominated in one of
     # them the price is asked for in that currency and no conversion happens.
     def ticker_for(asset, currency)
+      bare = "#{TICKER_PREFIX}#{asset}"
       quote = currency.to_s.upcase
-      return "#{TICKER_PREFIX}#{asset}" if quote.blank? || quote == asset
-      return "#{TICKER_PREFIX}#{asset}" unless QUOTED_CURRENCIES.include?(quote)
+      return bare if quote.blank? || quote == asset
+      return bare unless QUOTED_CURRENCIES.include?(quote)
 
-      "#{TICKER_PREFIX}#{asset}#{quote}"
+      quoted = "#{bare}#{quote}"
+      quoted_pair_priceable?(quoted) ? quoted : bare
+    end
+
+    # The venue quotes the currency, but not necessarily for this asset: a small
+    # coin may trade only against USDT. Asking for a pair that does not exist
+    # leaves the security with no prices at all, which is worse than pricing in
+    # USD and converting -- the holding silently values at zero.
+    #
+    # Memoised because resolve runs once per ledger entry, and a sync carries
+    # thousands; the probe is one request per asset per process.
+    def quoted_pair_priceable?(ticker)
+      cache = (@quoted_pair_priceable ||= {})
+      return cache[ticker] if cache.key?(ticker)
+
+      cache[ticker] = probe_quoted_pair(ticker)
+    end
+
+    def probe_quoted_pair(ticker)
+      provider = Security.provider_for(PRICE_PROVIDER)
+      return false if provider.nil?
+
+      response = provider.fetch_security_price(
+        symbol: ticker, exchange_operating_mic: EXCHANGE_MIC, date: Date.current
+      )
+      response.success? && response.data.present?
+    rescue StandardError => e
+      # A transient failure downgrades this asset to the bare ticker for the
+      # life of the process rather than leaving it unpriced; the next boot
+      # retries.
+      Rails.logger.info "KrakenAccount::SecurityResolver - #{ticker} not priceable (#{e.class}), using the bare ticker"
+      false
     end
 
     # "XBT.M" -> "BTC", "DOT28.S" -> "DOT", "CRYPTO:ETH" -> "ETH"
