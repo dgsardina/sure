@@ -175,7 +175,7 @@ class KrakenAccount::LedgerProcessor
     # its amount regardless of label, so anything else would reintroduce the
     # phantom cash. The units and their price carry the value instead.
     def process_crypto_ledger_entry(external_id:, ledger_id:, ledger:, type:, raw_asset:, base_symbol:, symbol:, qty:, date:)
-      security = KrakenAccount::SecurityResolver.resolve(base_symbol)
+      security = KrakenAccount::SecurityResolver.resolve(base_symbol, currency: target_currency)
       return unless security
 
       price, price_missing = unit_price_on(security, base_symbol, date)

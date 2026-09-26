@@ -24,6 +24,10 @@ class KrakenAccount::SecurityResolver
   PRICE_PROVIDER = Onchain::SecurityResolver::PRICE_PROVIDER
   EXCHANGE_MIC = Onchain::SecurityResolver::EXCHANGE_MIC
 
+  # Currencies the price provider can quote directly, so a price in one of them
+  # needs no conversion.
+  QUOTED_CURRENCIES = Provider::BinancePublic::QUOTE_TO_CURRENCY.values.uniq.freeze
+
   # Kraken suffixes a staked or bonded balance onto the asset code -- XBT.M,
   # ETH2.S, DOT28.S -- and those are the same asset in a different wallet. The
   # suffix can repeat: a balance payload reports bonded DOT as DOT28.S.S, so the
@@ -39,13 +43,25 @@ class KrakenAccount::SecurityResolver
   SYMBOL_FALLBACKS = KrakenAccount::AssetNormalizer::SYMBOL_FALLBACKS
 
   class << self
-    def resolve(asset_symbol)
+    def resolve(asset_symbol, currency: nil)
       asset = canonical_asset(asset_symbol)
       return nil if asset.blank?
 
-      ticker = "#{TICKER_PREFIX}#{asset}"
+      ticker = ticker_for(asset, currency)
 
       existing_security(ticker) || create_security(ticker, asset)
+    end
+
+    # A bare CRYPTO:<ASSET> ticker prices against USDT and is then converted,
+    # which adds a round trip and the spread between two venues. Binance quotes
+    # a handful of fiats directly, so when the account is denominated in one of
+    # them the price is asked for in that currency and no conversion happens.
+    def ticker_for(asset, currency)
+      quote = currency.to_s.upcase
+      return "#{TICKER_PREFIX}#{asset}" if quote.blank? || quote == asset
+      return "#{TICKER_PREFIX}#{asset}" unless QUOTED_CURRENCIES.include?(quote)
+
+      "#{TICKER_PREFIX}#{asset}#{quote}"
     end
 
     # "XBT.M" -> "BTC", "DOT28.S" -> "DOT", "CRYPTO:ETH" -> "ETH"
