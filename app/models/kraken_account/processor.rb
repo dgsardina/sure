@@ -77,7 +77,7 @@ class KrakenAccount::Processor
       fee = trade["fee"].presence&.to_d || 0
       currency = quote_symbol.presence || "USD"
       date = Time.zone.at(trade["time"].to_d).to_date
-      security = KrakenAccount::SecurityResolver.resolve(base_symbol)
+      security = KrakenAccount::SecurityResolver.resolve(base_symbol, currency: target_currency)
       return unless security
 
       # Sure's convention is positive = money out, so a buy is +cost and a sell
