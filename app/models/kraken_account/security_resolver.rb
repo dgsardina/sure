@@ -11,10 +11,18 @@
 # resolve "CRYPTO:BTC" it answers with whatever pair its price provider ranks
 # first -- BTCBRL, BTC-EUR, BTCUSD -- which is a different security each time the
 # ranking moves, and never the one already in the database, because the ticker it
-# returns is not the ticker that was asked for. A provider match is therefore
-# accepted only when it comes back under the ticker we asked for.
+# returns is not the ticker that was asked for.
+#
+# The ticker is instead bound straight to the crypto price provider, exactly as
+# Onchain::SecurityResolver does, and for the same reason. That also keeps one
+# asset in one record across integrations: the CRYPTO: prefix is shared, so a
+# coin held both on Kraken and on-chain is a single security rather than two.
 class KrakenAccount::SecurityResolver
-  EXCHANGE_MIC = "XKRA"
+  TICKER_PREFIX = "CRYPTO:"
+
+  # The only securities provider that prices bare crypto symbols.
+  PRICE_PROVIDER = Onchain::SecurityResolver::PRICE_PROVIDER
+  EXCHANGE_MIC = Onchain::SecurityResolver::EXCHANGE_MIC
 
   # Kraken suffixes a staked or bonded balance onto the asset code -- XBT.M,
   # ETH2.S, DOT28.S -- and those are the same asset in a different wallet. The
@@ -35,11 +43,9 @@ class KrakenAccount::SecurityResolver
       asset = canonical_asset(asset_symbol)
       return nil if asset.blank?
 
-      ticker = "CRYPTO:#{asset}"
+      ticker = "#{TICKER_PREFIX}#{asset}"
 
-      Security.find_by(ticker: ticker) ||
-        provider_match(ticker) ||
-        offline_security(ticker, asset)
+      existing_security(ticker) || create_security(ticker, asset)
     end
 
     # "XBT.M" -> "BTC", "DOT28.S" -> "DOT", "CRYPTO:ETH" -> "ETH"
@@ -53,28 +59,31 @@ class KrakenAccount::SecurityResolver
 
     private
 
-      # Only a security carrying the ticker we asked for is this asset. Anything
-      # else is a pair that merely mentions it.
-      def provider_match(ticker)
-        security = Security::Resolver.new(ticker).resolve
+      # Deliberately ignores exchange_operating_mic: a Security for this ticker
+      # may already exist because another integration created it first, and
+      # reusing it keeps one asset in one record. A blank price_provider would
+      # fall back to whichever provider is enabled first, and only the crypto one
+      # quotes a bare coin symbol, so it is filled in -- but a provider another
+      # integration chose deliberately is left alone.
+      def existing_security(ticker)
+        security = Security.find_by(ticker: ticker)
         return nil if security.nil?
-        return security if security.ticker.to_s.casecmp?(ticker)
 
-        Rails.logger.info(
-          "KrakenAccount::SecurityResolver - ignoring #{security.ticker} for #{ticker}: a pair, not the asset"
-        )
-        nil
-      rescue StandardError => e
-        Rails.logger.warn "KrakenAccount::SecurityResolver - resolver failed for #{ticker}: #{e.message}"
-        nil
+        security.update!(price_provider: PRICE_PROVIDER) if security.price_provider.blank?
+        security.update!(offline: false) if security.offline?
+        security
       end
 
-      def offline_security(ticker, asset)
-        Security.find_or_initialize_by(ticker: ticker, exchange_operating_mic: EXCHANGE_MIC).tap do |security|
-          security.name = asset if security.name.blank?
-          security.offline = true unless security.offline
-          security.save! if security.changed?
-        end
+      def create_security(ticker, asset)
+        Security.create!(
+          ticker: ticker,
+          name: asset,
+          exchange_operating_mic: EXCHANGE_MIC,
+          price_provider: PRICE_PROVIDER
+        )
+      rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+        Rails.logger.warn "KrakenAccount::SecurityResolver - could not create #{ticker}: #{e.message}"
+        Security.find_by(ticker: ticker)
       end
   end
 end
