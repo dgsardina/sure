@@ -79,7 +79,7 @@ class KrakenAccount::HoldingsProcessor
     end
 
     def resolve_security(symbol)
-      KrakenAccount::SecurityResolver.resolve(symbol, currency: target_currency)
+      KrakenAccount::SecurityResolver.resolve(symbol)
     end
 
     def log_stale_rate(symbol, field, rate_date)

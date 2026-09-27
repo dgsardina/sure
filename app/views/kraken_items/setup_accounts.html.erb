@@ -63,19 +63,15 @@
                   <%# Kraken reports in USD. Show the figure in the currency the account
                       will actually be created in, which is the one every other number
                       on the screen is in. %>
-                  <% display_currency = Current.family.currency
-                     raw_balance = kraken_account.current_balance || 0
-                     display_balance = begin
-                       Money.new(raw_balance, kraken_account.currency).exchange_to(display_currency).amount
-                     rescue StandardError
-                       display_currency = kraken_account.currency
-                       raw_balance
+                  <% reported = Money.new(kraken_account.current_balance || 0, kraken_account.currency)
+                     display = begin
+                       reported.exchange_to(Current.family.currency)
+                     rescue Money::ConversionError
+                       reported
                      end %>
                   <div class="text-right flex-shrink-0">
-                    <p class="text-sm font-medium text-primary">
-                      <%= number_with_delimiter(display_balance.round(2), delimiter: ",") %>
-                    </p>
-                    <p class="text-xs text-secondary"><%= display_currency %></p>
+                    <p class="text-sm font-medium text-primary"><%= format_money(display) %></p>
+                    <p class="text-xs text-secondary"><%= display.currency.iso_code %></p>
                   </div>
                 </label>
               <% end %>

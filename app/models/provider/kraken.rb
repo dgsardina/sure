@@ -17,6 +17,8 @@ class Provider::Kraken
   # TradesHistory each cost 2 points against a cap of ~15-20 that refills at
   # under 1 point/second. Paginated backfills (MAX_LEDGER_PAGES = 200) issue
   # those calls back to back and exhaust it, so requests are spaced out.
+  # Public endpoints are limited separately, per IP, at about the same rate,
+  # so the one interval covers both.
   MIN_REQUEST_INTERVAL = 1.0
 
   BASE_URL = "https://api.kraken.com"
