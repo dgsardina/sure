@@ -101,7 +101,6 @@ class KrakenAccount::LedgerProcessor
       return if type == "earn" && EARN_INTERNAL_SUBTYPES.include?(subtype)
 
       external_id = "kraken_ledger_#{ledger_id}"
-      return if @existing_external_ids.include?(external_id)
 
       raw_asset  = ledger["asset"].to_s
       raw_amount = ledger["amount"].to_d
@@ -131,6 +130,15 @@ class KrakenAccount::LedgerProcessor
           raw_asset: raw_asset, base_symbol: base_symbol, symbol: symbol,
           qty: abs_impact, date: date
         )
+        return
+      end
+
+      # The principal is in from an earlier pass. Its fee may not be -- pricing
+      # it can fail on one sync and succeed on the next -- and it is checked on
+      # its own external_id, so a later sync can still create the missing half
+      # without duplicating the one it has.
+      if @existing_external_ids.include?(external_id)
+        process_ledger_fee(external_id, ledger_id, ledger, raw_fee, symbol, date) if split_fee
         return
       end
 
