@@ -53,6 +53,8 @@ class KrakenAccount::LedgerProcessor
                                     .pluck(:external_id)
                                     .to_set
 
+    warm_crypto_prices
+
     raw_ledgers.each do |ledger_id, ledger|
       process_ledger_entry(ledger_id, ledger)
     rescue StandardError => e
@@ -115,9 +117,7 @@ class KrakenAccount::LedgerProcessor
       normalized  = normalizer.normalize(raw_asset)
       symbol      = normalized[:symbol]
       base_symbol = normalized[:price_symbol]
-      fiat        = KrakenAccount::FIAT_CURRENCIES.include?(
-        KrakenAccount::SecurityResolver.canonical_asset(base_symbol)
-      )
+      fiat        = fiat?(base_symbol)
 
       # A crypto fee is paid in the units themselves, so it only reduces the
       # quantity; there is no second cash movement to split out.
@@ -175,7 +175,7 @@ class KrakenAccount::LedgerProcessor
     # its amount regardless of label, so anything else would reintroduce the
     # phantom cash. The units and their price carry the value instead.
     def process_crypto_ledger_entry(external_id:, ledger_id:, ledger:, type:, raw_asset:, base_symbol:, symbol:, qty:, date:)
-      security = KrakenAccount::SecurityResolver.resolve(base_symbol, currency: target_currency)
+      security = resolve_security(base_symbol)
       return unless security
 
       price, price_missing = unit_price_on(security, base_symbol, date)
@@ -218,11 +218,45 @@ class KrakenAccount::LedgerProcessor
       end
     end
 
+    def fiat?(base_symbol)
+      KrakenAccount::FIAT_CURRENCIES.include?(KrakenAccount::SecurityResolver.canonical_asset(base_symbol))
+    end
+
+    # One bulk request per asset for the span the ledger covers, the same call
+    # MarketDataImporter makes, so that the per-entry lookup below is a
+    # database read. Left to find_or_fetch_price it was one provider request
+    # per entry -- thousands on a first import.
+    def warm_crypto_prices
+      spans = {}
+      raw_ledgers.each_value do |ledger|
+        next unless SUPPORTED_TYPES.include?(ledger["type"].to_s.downcase)
+
+        base_symbol = normalizer.normalize(ledger["asset"].to_s)[:price_symbol]
+        next if base_symbol.blank? || fiat?(base_symbol)
+
+        date = Time.zone.at(ledger["time"].to_d).to_date
+        span = (spans[base_symbol] ||= [ date, date ])
+        span[0] = date if date < span[0]
+        span[1] = date if date > span[1]
+      end
+
+      spans.each do |base_symbol, (from, to)|
+        security = resolve_security(base_symbol)
+        security&.import_provider_prices(start_date: from, end_date: to)
+      rescue StandardError => e
+        Rails.logger.warn "KrakenAccount::LedgerProcessor - could not warm prices for #{base_symbol}: #{e.message}"
+      end
+    end
+
+    def resolve_security(base_symbol)
+      KrakenAccount::SecurityResolver.resolve(base_symbol)
+    end
+
     # The price on the day the units moved, not the price today. Falls back to
     # the balance snapshot's price, which is what the whole processor used to
     # use, and flags the entry so the staleness is visible in `extra`.
     def unit_price_on(security, base_symbol, date)
-      price = security.find_or_fetch_price(date: date)
+      price = security.prices.find_by(date: date)
       if price&.price.present?
         converted = Money.new(price.price, price.currency).exchange_to(target_currency).amount
         return [ converted, false ]
@@ -372,6 +406,8 @@ class KrakenAccount::LedgerProcessor
       when "staking"    then "Dividend"
       when "earn"       then "Interest"
       when "fee"        then "Fee"
+      when "spend"      then "Sweep Out"
+      when "receive"    then "Sweep In"
       end
     end
 
