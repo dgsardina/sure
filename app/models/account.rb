@@ -405,7 +405,11 @@ class Account < ApplicationRecord
         # in another.
         provider_currency = provider_account.currency.presence || family.currency
         balance = (provider_account.current_balance || 0).to_d
-        balance = convert_provider_balance(balance, from: provider_currency, to: family.currency)
+        # With no rate the figure cannot be stated in the family currency, and
+        # relabelling it would be wrong by the whole rate. Zero is honest: the
+        # first sync writes the converted balance minutes later, and the
+        # opening anchor is zeroed below regardless.
+        balance = convert_provider_balance(balance, from: provider_currency, to: family.currency) || 0
 
         attributes = {
           family: family,
@@ -437,7 +441,7 @@ class Account < ApplicationRecord
 
         Money.new(amount, from).exchange_to(to).amount
       rescue Money::ConversionError
-        amount
+        nil
       end
 
       def build_simplefin_accountable_attributes(simplefin_account, account_type, subtype)
