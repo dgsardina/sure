@@ -101,6 +101,10 @@ class KrakenAccount::LedgerProcessor
       return if type == "earn" && EARN_INTERNAL_SUBTYPES.include?(subtype)
 
       external_id = "kraken_ledger_#{ledger_id}"
+      # Already in, and nothing more to add for it: skip before any parsing. A
+      # split-fee type is the exception, checked further down once the fee is
+      # known -- its second entry may still be owed.
+      return if @existing_external_ids.include?(external_id) && !SPLIT_FEE_TYPES.include?(type)
 
       raw_asset  = ledger["asset"].to_s
       raw_amount = ledger["amount"].to_d
@@ -122,7 +126,6 @@ class KrakenAccount::LedgerProcessor
       # quantity; there is no second cash movement to split out.
       split_fee = fiat && SPLIT_FEE_TYPES.include?(type) && !raw_fee.zero?
       abs_impact = split_fee ? raw_amount.abs : (raw_amount - raw_fee).abs
-      return if abs_impact.zero?
 
       unless fiat
         process_crypto_ledger_entry(
@@ -133,11 +136,12 @@ class KrakenAccount::LedgerProcessor
         return
       end
 
-      # The principal is in from an earlier pass. Its fee may not be -- pricing
-      # it can fail on one sync and succeed on the next -- and it is checked on
-      # its own external_id, so a later sync can still create the missing half
+      # The principal is in from an earlier pass, or there is none: a correction
+      # row can carry a fee against a zero amount. Either way the fee is checked
+      # on its own external_id, so a later sync can still create the missing
+      # half -- pricing it can fail on one sync and succeed on the next --
       # without duplicating the one it has.
-      if @existing_external_ids.include?(external_id)
+      if abs_impact.zero? || @existing_external_ids.include?(external_id)
         process_ledger_fee(external_id, ledger_id, ledger, raw_fee, symbol, date) if split_fee
         return
       end
@@ -288,7 +292,7 @@ class KrakenAccount::LedgerProcessor
 
       account.entries.create!(
         date: date,
-        name: "Fee #{raw_fee.abs} #{symbol}",
+        name: build_name("fee", raw_fee.abs, symbol),
         amount: fee_amount.abs,
         currency: target_currency,
         external_id: fee_external_id,
