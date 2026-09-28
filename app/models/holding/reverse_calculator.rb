@@ -101,7 +101,7 @@ class Holding::ReverseCalculator
 
         trade_price = Money.new(trade.price, trade.currency)
         begin
-          converted_price = trade_price.exchange_to(account.currency).amount
+          converted_price = trade_price.exchange_to(account.currency, date: trade_entry.date).amount
         rescue Money::ConversionError
           converted_price = trade.price
         end
@@ -113,7 +113,7 @@ class Holding::ReverseCalculator
         # still held.
         trade_fee = trade.fee || 0
         begin
-          converted_fee = trade_fee.zero? ? trade_fee : Money.new(trade_fee, trade.currency).exchange_to(account.currency).amount
+          converted_fee = trade_fee.zero? ? trade_fee : Money.new(trade_fee, trade.currency).exchange_to(account.currency, date: trade_entry.date).amount
         rescue Money::ConversionError
           converted_fee = trade_fee
         end
